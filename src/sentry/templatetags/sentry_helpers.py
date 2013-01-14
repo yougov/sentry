@@ -20,6 +20,7 @@ from sentry.constants import STATUS_MUTED
 from sentry.models import Group
 from sentry.utils.javascript import to_json
 from sentry.utils.strings import truncatechars
+from sentry.web.helpers import get_login_url
 from templatetag_sugar.register import tag
 from templatetag_sugar.parser import Name, Variable, Constant, Optional
 
@@ -373,3 +374,8 @@ def github_button(user, repo):
         'user': user,
         'repo': repo,
     }
+
+
+@register.simple_tag(takes_context=True)
+def login_url(context):
+    return get_login_url(request=context['request'])

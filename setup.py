@@ -73,7 +73,7 @@ install_requires = [
 
 setup(
     name='sentry',
-    version='5.1.2.login_patch',
+    version='5.1.3.login_patch',
     author='David Cramer',
     author_email='dcramer@gmail.com',
     url='http://www.getsentry.com',

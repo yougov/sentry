@@ -72,7 +72,6 @@ def index_event(event, **kwargs):
         doc_type='group',
         doc=document_for_group(group),
         id=group.id,
-        es_parent=group.id,
     )
     app.search.index(
         index='sentry',

@@ -9,6 +9,7 @@ sentry.app
 from sentry.conf import settings
 from sentry.utils.imports import import_string
 from threading import local
+from pyelasticsearch import ElasticSearch
 
 
 class State(local):
@@ -22,5 +23,13 @@ def get_instance(path, options):
         raise ImportError('Unable to find module %s' % path)
     return cls(**options)
 
-buffer = get_instance(settings.BUFFER, settings.BUFFER_OPTIONS)
+
+def get_search(options):
+    return ElasticSearch(**options)
+
 env = State()
+buffer = get_instance(settings.BUFFER, settings.BUFFER_OPTIONS)
+if settings.USE_SEARCH:
+    search = get_search(settings.SEARCH_OPTIONS)
+else:
+    search = None

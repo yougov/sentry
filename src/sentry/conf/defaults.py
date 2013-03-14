@@ -128,6 +128,11 @@ USE_QUEUE = False
 # events..
 USE_SEARCH = True
 
+SEARCH_OPTIONS = {
+    'urls': ['http://localhost:9200/'],
+    'timeout': 5,
+}
+
 # Default sort option for the group stream
 DEFAULT_SORT_OPTION = 'date'
 

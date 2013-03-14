@@ -12,6 +12,8 @@ from collections import defaultdict
 # TODO: ensure upgrade creates search schemas
 # TODO: optimize group indexing so it only happens when a group is updated
 # TODO: only index an event after a group is indexed??
+# TODO: confirm replication=async is a good idea
+# TODO: determine TTL
 
 
 def schema_for_event():
@@ -72,11 +74,13 @@ def index_event(event, **kwargs):
         doc_type='group',
         doc=document_for_group(group),
         id=group.id,
+        replication='async',
     )
     app.search.index(
         index='sentry',
         doc_type='event',
         doc=document_for_event(event),
         id=event.id,
-        es_parent=group.id,
+        parent=group.id,
+        replication='async',
     )

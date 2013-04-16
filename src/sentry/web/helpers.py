@@ -9,6 +9,8 @@ sentry.web.helpers
 import logging
 import warnings
 
+from urlparse import urlparse
+
 from django.conf import settings as dj_settings
 from django.core.urlresolvers import reverse, resolve
 from django.http import HttpResponse
@@ -62,7 +64,7 @@ def get_team_list(user, access=None):
 _LOGIN_URL = None
 
 
-def get_login_url(reset=False):
+def get_login_url(reset=False, request=None):
     global _LOGIN_URL
 
     if _LOGIN_URL is None or reset:
@@ -77,6 +79,10 @@ def get_login_url(reset=False):
 
         if _LOGIN_URL is None:
             _LOGIN_URL = reverse('sentry-login')
+
+    if dj_settings.LOGIN_URL_NEXT_PARAM:
+        return '%s?%s=%s' % (_LOGIN_URL, dj_settings.LOGIN_URL_NEXT_PARAM,
+            request.build_absolute_uri().split('?')[0])
     return _LOGIN_URL
 
 

@@ -35,7 +35,7 @@ def has_access(access_or_func=None, team=None, access=None):
             # All requests require authentication
             if not request.user.is_authenticated():
                 request.session['_next'] = request.get_full_path()
-                return HttpResponseRedirect(get_login_url())
+                return HttpResponseRedirect(get_login_url(request=request))
 
             has_team = 'team_slug' in kwargs
             has_project = 'project_id' in kwargs
@@ -146,7 +146,7 @@ def login_required(func):
     def wrapped(request, *args, **kwargs):
         if not request.user.is_authenticated():
             request.session['_next'] = request.get_full_path()
-            return HttpResponseRedirect(get_login_url())
+            return HttpResponseRedirect(get_login_url(request=request))
         return func(request, *args, **kwargs)
     return wrapped
 
@@ -156,7 +156,7 @@ def requires_admin(func):
     def wrapped(request, *args, **kwargs):
         if not request.user.is_authenticated():
             request.session['_next'] = request.get_full_path()
-            return HttpResponseRedirect(get_login_url())
+            return HttpResponseRedirect(get_login_url(request=request))
         if not request.user.is_staff:
             return render_to_response('sentry/missing_permissions.html', status=400)
         return func(request, *args, **kwargs)
@@ -169,7 +169,7 @@ def permission_required(perm):
         def _wrapped(request, *args, **kwargs):
             if not request.user.is_authenticated():
                 request.session['_next'] = request.get_full_path()
-                return HttpResponseRedirect(get_login_url())
+                return HttpResponseRedirect(get_login_url(request=request))
             if not request.user.has_perm(perm):
                 return render_to_response('sentry/missing_permissions.html', status=400)
             return func(request, *args, **kwargs)

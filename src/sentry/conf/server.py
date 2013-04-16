@@ -183,6 +183,9 @@ else:
     LOGIN_REDIRECT_URL = reverse_lazy('sentry-login-redirect')
     LOGIN_URL = reverse_lazy('sentry-login')
 
+# Override to a next param to the querystring.
+LOGIN_URL_NEXT_PARAM = None
+
 AUTHENTICATION_BACKENDS = (
     'social_auth.backends.twitter.TwitterBackend',
     'social_auth.backends.facebook.FacebookBackend',
@@ -264,7 +267,7 @@ CELERY_QUEUES = (
 
 # Sentry and Raven configuration
 
-SENTRY_PUBLIC = False
+SENTRY_PUBLIC = True
 SENTRY_PROJECT = 1
 SENTRY_CACHE_BACKEND = 'default'
 

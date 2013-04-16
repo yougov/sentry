@@ -25,6 +25,7 @@ from sentry.utils.http import absolute_uri
 from sentry.utils.javascript import to_json
 from sentry.utils.safe import safe_execute
 from sentry.utils.strings import truncatechars
+from sentry.web.helpers import get_login_url
 from templatetag_sugar.register import tag
 from templatetag_sugar.parser import Name, Variable, Constant, Optional
 
@@ -409,3 +410,8 @@ def recent_alerts(context, project, asvar):
     context[asvar] = list(Alert.get_recent_for_project(project.id))
 
     return ''
+
+
+@register.simple_tag(takes_context=True)
+def login_url(context):
+    return get_login_url(request=context['request'])

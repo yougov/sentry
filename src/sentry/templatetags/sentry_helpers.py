@@ -7,6 +7,12 @@ sentry.templatetags.sentry_helpers
 """
 # XXX: Import django-paging's template tags so we don't have to worry about
 #      INSTALLED_APPS
+
+import datetime
+
+from paging.helpers import paginate as paginate_func
+from urllib import quote
+
 from django import template
 from django.template import RequestContext
 from django.template.defaultfilters import stringfilter
@@ -14,7 +20,7 @@ from django.template.loader import render_to_string
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext as _
-from paging.helpers import paginate as paginate_func
+
 from sentry.conf import settings
 from sentry.constants import STATUS_MUTED
 from sentry.models import Group
@@ -27,8 +33,6 @@ from sentry.utils.safe import safe_execute
 from sentry.utils.strings import truncatechars
 from templatetag_sugar.register import tag
 from templatetag_sugar.parser import Name, Variable, Constant, Optional
-
-import datetime
 
 register = template.Library()
 
@@ -409,3 +413,8 @@ def recent_alerts(context, project, asvar):
     context[asvar] = list(Alert.get_recent_for_project(project.id))
 
     return ''
+
+
+@register.filter
+def urlquote(value, safe=''):
+    return quote(value, safe)

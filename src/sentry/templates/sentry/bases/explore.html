@@ -1,0 +1,16 @@
+{% extends "sentry/layout.html" %}
+
+{% load url from future %}
+{% load i18n %}
+
+{% block title %}{% trans "Explore" %} | {{ project.name }} | {{ block.super }}{% endblock %}
+
+{% block page_header %}
+{% endblock %}
+
+
+{% block main %}
+    <section class="body">
+    	{% block inner %}{% endblock %}
+    </section>
+{% endblock %}

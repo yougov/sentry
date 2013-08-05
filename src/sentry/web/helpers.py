@@ -81,8 +81,11 @@ def get_login_url(reset=False, request=None):
             _LOGIN_URL = reverse('sentry-login')
 
     if dj_settings.LOGIN_URL_NEXT_PARAM:
-        return '%s?%s=%s' % (_LOGIN_URL, dj_settings.LOGIN_URL_NEXT_PARAM,
-            request.build_absolute_uri().split('?')[0])
+        host = dj_settings.SENTRY_URL_PREFIX \
+                if 'SENTRY_URL_PREFIX' in dj_settings \
+                else request.build_absolute_uri().split('?')[0]
+        return '%s?%s=%s' % (_LOGIN_URL,
+                dj_settings.LOGIN_URL_NEXT_PARAM, host)
     return _LOGIN_URL
 
 

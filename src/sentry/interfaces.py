@@ -24,6 +24,7 @@ from django.utils.translation import ugettext as _
 
 from sentry.app import env
 from sentry.models import UserOption
+from sentry.utils.strings import strip
 from sentry.web.helpers import render_to_string
 
 _Exception = Exception
@@ -40,7 +41,7 @@ def is_url(filename):
 
 
 def get_context(lineno, context_line, pre_context=None, post_context=None, filename=None,
-        format=False):
+                format=False):
     lineno = int(lineno)
     context = []
     start_lineno = lineno - len(pre_context or [])
@@ -260,9 +261,10 @@ class Frame(object):
     attrs = ('abs_path', 'filename', 'lineno', 'colno', 'in_app', 'context_line',
              'pre_context', 'post_context', 'vars', 'module', 'function', 'data')
 
-    def __init__(self, abs_path=None, filename=None, lineno=None, colno=None, in_app=False,
-                 context_line=None, pre_context=(), post_context=(), vars=None,
-                 module=None, function=None, data=None, **kwargs):
+    def __init__(self, abs_path=None, filename=None, lineno=None, colno=None,
+                 in_app=None, context_line=None, pre_context=(),
+                 post_context=(), vars=None, module=None, function=None,
+                 data=None, **kwargs):
         self.abs_path = abs_path or filename
         self.filename = filename or abs_path
 
@@ -301,6 +303,10 @@ class Frame(object):
 
     def is_valid(self):
         if self.in_app not in (False, True, None):
+            return False
+        if type(self.vars) != dict:
+            return False
+        if type(self.data) != dict:
             return False
         return self.filename or self.function or self.module
 
@@ -372,8 +378,10 @@ class Frame(object):
         else:
             choices = []
         choices.append('default')
-        templates = ['sentry/partial/frames/%s.txt' % choice
-                      for choice in choices]
+        templates = [
+            'sentry/partial/frames/%s.txt' % choice
+            for choice in choices
+        ]
         return render_to_string(templates, {
             'abs_path': self.abs_path,
             'filename': self.filename,
@@ -388,8 +396,8 @@ class Frame(object):
 class Stacktrace(Interface):
     """
     A stacktrace contains a list of frames, each with various bits (most optional)
-    describing the context of that frame. Frames should be sorted with the most recent
-    caller being the last in the list.
+    describing the context of that frame. Frames should be sorted from oldest
+    to newest.
 
     The stacktrace contains one element, ``frames``, which is a list of hashes. Each
     hash must contain **at least** the ``filename`` attribute. The rest of the values
@@ -464,6 +472,9 @@ class Stacktrace(Interface):
     def __init__(self, frames, **kwargs):
         self.frames = [Frame(**f) for f in frames]
 
+    def __iter__(self):
+        return iter(self.frames)
+
     def validate(self):
         for frame in self.frames:
             # ensure we've got the correct required values
@@ -481,6 +492,9 @@ class Stacktrace(Interface):
         return {
             'frames': frames,
         }
+
+    def has_app_frames(self):
+        return any(f.in_app is not None for f in self.frames)
 
     def unserialize(self, data):
         data['frames'] = [Frame(**f) for f in data.pop('frames', [])]
@@ -654,9 +668,9 @@ class SingleException(Interface):
             stacktrace = None
 
         return {
-            'type': self.type,
-            'value': self.value,
-            'module': self.module,
+            'type': strip(self.type) or None,
+            'value': strip(self.value) or None,
+            'module': strip(self.module) or None,
             'stacktrace': stacktrace,
         }
 
@@ -683,17 +697,21 @@ class SingleException(Interface):
         if interface is not None and interface.frames:
             last_frame = interface.frames[-1]
 
+        e_module = strip(self.module)
+        e_type = strip(self.type) or 'Exception'
+        e_value = strip(self.value)
+
         if self.module:
-            fullname = '%s.%s' % (self.module, self.type)
+            fullname = '%s.%s' % (e_module, e_type)
         else:
-            fullname = self.type
+            fullname = e_type
 
         return {
             'is_public': is_public,
             'event': event,
-            'exception_value': self.value,
-            'exception_type': self.type,
-            'exception_module': self.module,
+            'exception_value': e_value or e_type or '<empty value>',
+            'exception_type': e_type,
+            'exception_module': e_module,
             'fullname': fullname,
             'last_frame': last_frame
         }
@@ -724,6 +742,9 @@ class Exception(Interface):
     >>>         # see sentry.interfaces.Stacktrace
     >>>     }
     >>> }]
+
+    Values should be sent oldest to newest, this includes both the stacktrace
+    and the exception itself.
 
     .. note:: This interface can be passed as the 'exception' key in addition
               to the full interface path.
@@ -782,6 +803,7 @@ class Exception(Interface):
         }
 
         exceptions = []
+        last = len(self.values) - 1
         for num, e in enumerate(self.values):
             context = e.get_context(**context_kwargs)
             if e.stacktrace:
@@ -790,10 +812,15 @@ class Exception(Interface):
             else:
                 context['stacktrace'] = {}
             context['stack_id'] = 'exception_%d' % (num,)
+            context['is_root'] = num == last
             exceptions.append(context)
+
+        if newest_first:
+            exceptions.reverse()
+
         return {
             'newest_first': newest_first,
-            'system_frames': any(e['stacktrace'].get('system_frames') for e in exceptions),
+            'system_frames': sum(e['stacktrace'].get('system_frames', 0) for e in exceptions),
             'exceptions': exceptions,
             'stacktrace': self.get_stacktrace(event, newest_first=newest_first)
         }
@@ -941,7 +968,8 @@ class Http(Interface):
         data = self.data
         headers_is_dict, headers = self._to_dict(self.headers)
 
-        if headers_is_dict and headers.get('Content-Type') == 'application/x-www-form-urlencoded':
+        # educated guess as to whether the body is normal POST data
+        if headers_is_dict and headers.get('Content-Type') == 'application/x-www-form-urlencoded' and '=' in data:
             _, data = self._to_dict(data)
 
         context = {
@@ -1116,6 +1144,8 @@ class User(Interface):
         return []
 
     def to_html(self, event, is_public=False, **kwargs):
+        if is_public:
+            return ''
         return render_to_string('sentry/partial/interfaces/user.html', {
             'is_public': is_public,
             'event': event,

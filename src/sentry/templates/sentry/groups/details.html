@@ -1,18 +1,11 @@
 {% extends "sentry/groups/group_list.html" %}
 
-{% load url from future %}
 {% load i18n %}
 {% load sentry_activity %}
 {% load sentry_helpers %}
 {% load sentry_plugins %}
 
 {% block title %}{% if event %}{{ event.error }}{% else %}{{ group.message }}{% endif %} | {{ block.super }}{% endblock %}
-
-{% block breadcrumb %}
-    {{ block.super }}
-    <li class="divider"></li>
-    <li><a href="{% url 'sentry-group' group.team.slug group.project.slug group.id %}">{{ group.message }}</a></li>
-{% endblock %}
 
 {% block main %}
     {% handle_before_events request group %}
@@ -36,7 +29,6 @@
                     </div>
                 {% endif %}
 
-
                 {% if activity %}
                     <ul class="activity">
                         {% for item in activity %}
@@ -53,7 +45,7 @@
                     <!-- We switch the ordering of events here as it makes more sense visually -->
                     <a class="btn pull-left prev {% if not next_event %} disabled{% endif %}"{% if next_event %} href="{% url 'sentry-group-event' group.team.slug group.project.slug group.id next_event.id %}"{% endif %}><span></span> {% trans "Newer Event" %}</a>
                     <a class="btn pull-right next {% if not prev_event %} disabled{% endif %}"{% if prev_event %} href="{% url 'sentry-group-event' group.team.slug group.project.slug group.id prev_event.id %}"{% endif %}>{% trans "Older Event" %} <span></span></a>
-                    <h4>Event at {{ event.datetime }} {{ event.datetime.tzinfo }}</h4>
+                    <h4>Event at {{ event.datetime }} {{ event.datetime.tzinfo }} [{{ event.size|filesizeformat }}]</h4>
                 </div>
 
                 {% include "sentry/partial/event_nav.html" %}

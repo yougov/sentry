@@ -9,26 +9,25 @@ sentry.utils.db
 import django
 import operator
 
-from django.conf import settings as django_settings
+from django.conf import settings
 from django.db.models.expressions import ExpressionNode, F
 from django.db.models.fields.related import SingleRelatedObjectDescriptor
-from sentry.conf import settings
 
 
 def get_db_engine(alias='default'):
     has_multidb = django.VERSION >= (1, 2)
     if has_multidb:
-        value = django_settings.DATABASES[alias]['ENGINE']
+        value = settings.DATABASES[alias]['ENGINE']
     else:
         assert alias == 'default', 'You cannot fetch a database engine other than the default on Django < 1.2'
-        value = django_settings.DATABASE_ENGINE
+        value = settings.DATABASE_ENGINE
     return value.rsplit('.', 1)[-1]
 
 
 def has_trending(alias='default'):
     # we only support trend queries for postgres to db optimization
     # issues in mysql, and lack of anything useful in sqlite
-    return settings.USE_TRENDING and get_db_engine('default').startswith('postgres')
+    return settings.SENTRY_USE_TRENDING and get_db_engine('default').startswith('postgres')
 
 
 def has_charts(db):
@@ -116,11 +115,16 @@ def attach_foreignkey(objects, field, related=[], database=None):
     # values specified in select_related
     values = set(filter(None, (getattr(o, column) for o in objects)))
     if values:
-        qs = model.objects.filter(**{'%s__in' % lookup: values})
+        qs = model.objects
         if database:
             qs = qs.using(database)
         if related:
             qs = qs.select_related(*related)
+
+        if len(values) > 1:
+            qs = qs.filter(**{'%s__in' % lookup: values})
+        else:
+            qs = [qs.get(**{lookup: iter(values).next()})]
 
         queryset = dict((getattr(o, key), o) for o in qs)
     else:

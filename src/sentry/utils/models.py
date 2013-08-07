@@ -140,50 +140,72 @@ def create_or_update(model, using=None, **kwargs):
     return affected, False
 
 
-class Model(models.Model):
-    class Meta:
-        abstract = True
+class BoundedAutoField(models.AutoField):
+    MAX_VALUE = 2147483647
 
-    update = update
-    __UNSAVED = object()
+    def get_prep_value(self, value):
+        if value:
+            value = int(value)
+            assert value <= self.MAX_VALUE
+        return super(BoundedAutoField, self).get_prep_value(value)
 
-    def __init__(self, *args, **kwargs):
-        super(Model, self).__init__(*args, **kwargs)
-        self._update_tracked_data()
-
-    def __get_field_value(self, field):
-        if isinstance(field, models.ForeignKey):
-            return getattr(self, field.column)
-        return getattr(self, field.name)
-
-    def _update_tracked_data(self):
-        "Updates a local copy of attributes values"
-
-        if self.id:
-            self.__data = dict((f.column, self.__get_field_value(f)) for f in self._meta.fields)
-        else:
-            self.__data = self.__UNSAVED
-
-    def has_changed(self, field_name):
-        "Returns ``True`` if ``field`` has changed since initialization."
-        if self.__data is self.__UNSAVED:
-            return False
-        field = self._meta.get_field(field_name)
-        return self.__data.get(field_name) != self.__get_field_value(field)
-
-    def old_value(self, field_name):
-        "Returns the previous value of ``field``"
-        if self.__data is self.__UNSAVED:
-            return None
-        return self.__data.get(field_name)
+    def south_field_triple(self):
+        "Returns a suitable description of this field for South."
+        from south.modelsinspector import introspector
+        field_class = "django.db.models.fields.AutoField"
+        args, kwargs = introspector(self)
+        return (field_class, args, kwargs)
 
 
-def __model_post_save(instance, **kwargs):
-    if not isinstance(instance, Model):
-        return
-    instance._update_tracked_data()
+class BoundedIntegerField(models.IntegerField):
+    MAX_VALUE = 2147483647
 
-signals.post_save.connect(__model_post_save)
+    def get_prep_value(self, value):
+        if value:
+            value = int(value)
+            assert value <= self.MAX_VALUE
+        return super(BoundedIntegerField, self).get_prep_value(value)
+
+    def south_field_triple(self):
+        "Returns a suitable description of this field for South."
+        from south.modelsinspector import introspector
+        field_class = "django.db.models.fields.IntegerField"
+        args, kwargs = introspector(self)
+        return (field_class, args, kwargs)
+
+
+class BoundedBigIntegerField(models.BigIntegerField):
+    MAX_VALUE = 9223372036854775807
+
+    def get_prep_value(self, value):
+        if value:
+            value = int(value)
+            assert value <= self.MAX_VALUE
+        return super(BoundedBigIntegerField, self).get_prep_value(value)
+
+    def south_field_triple(self):
+        "Returns a suitable description of this field for South."
+        from south.modelsinspector import introspector
+        field_class = "django.db.models.fields.BigIntegerField"
+        args, kwargs = introspector(self)
+        return (field_class, args, kwargs)
+
+
+class BoundedPositiveIntegerField(models.PositiveIntegerField):
+    MAX_VALUE = 2147483647
+
+    def get_prep_value(self, value):
+        if value:
+            value = int(value)
+            assert value <= self.MAX_VALUE
+        return super(BoundedPositiveIntegerField, self).get_prep_value(value)
+
+    def south_field_triple(self):
+        "Returns a suitable description of this field for South."
+        from south.modelsinspector import introspector
+        field_class = "django.db.models.fields.PositiveIntegerField"
+        args, kwargs = introspector(self)
+        return (field_class, args, kwargs)
 
 
 class GzippedDictField(models.TextField):
@@ -220,3 +242,65 @@ class GzippedDictField(models.TextField):
         field_class = "django.db.models.fields.TextField"
         args, kwargs = introspector(self)
         return (field_class, args, kwargs)
+
+
+class Model(models.Model):
+    id = BoundedAutoField(primary_key=True)
+
+    class Meta:
+        abstract = True
+
+    update = update
+    __UNSAVED = object()
+
+    def __init__(self, *args, **kwargs):
+        super(Model, self).__init__(*args, **kwargs)
+        self._update_tracked_data()
+
+    def __getstate__(self):
+        d = self.__dict__.copy()
+        # we cant serialize weakrefs
+        d.pop('_Model__data', None)
+        return d
+
+    def __reduce__(self):
+        (model_unpickle, stuff, _) = super(Model, self).__reduce__()
+        return (model_unpickle, stuff, self.__getstate__())
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._update_tracked_data()
+
+    def __get_field_value(self, field):
+        if isinstance(field, models.ForeignKey):
+            return getattr(self, field.column)
+        return getattr(self, field.name)
+
+    def _update_tracked_data(self):
+        "Updates a local copy of attributes values"
+
+        if self.id:
+            self.__data = dict((f.column, self.__get_field_value(f)) for f in self._meta.fields)
+        else:
+            self.__data = self.__UNSAVED
+
+    def has_changed(self, field_name):
+        "Returns ``True`` if ``field`` has changed since initialization."
+        if self.__data is self.__UNSAVED:
+            return False
+        field = self._meta.get_field(field_name)
+        return self.__data.get(field_name) != self.__get_field_value(field)
+
+    def old_value(self, field_name):
+        "Returns the previous value of ``field``"
+        if self.__data is self.__UNSAVED:
+            return None
+        return self.__data.get(field_name)
+
+
+def __model_post_save(instance, **kwargs):
+    if not isinstance(instance, Model):
+        return
+    instance._update_tracked_data()
+
+signals.post_save.connect(__model_post_save)

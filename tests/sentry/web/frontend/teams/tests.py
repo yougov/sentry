@@ -4,11 +4,11 @@ from __future__ import absolute_import
 
 import mock
 
-from django.contrib.auth.models import User
 from django.core.urlresolvers import reverse
 
 from sentry.constants import MEMBER_OWNER, MEMBER_USER
-from sentry.models import Team, TeamMember, PendingTeamMember, AccessGroup, Project
+from sentry.models import (
+    Team, TeamMember, PendingTeamMember, AccessGroup, Project, User)
 from sentry.testutils import TestCase, fixture, before
 
 
@@ -30,13 +30,6 @@ class BaseTeamTest(TestCase):
     @before
     def login_user(self):
         self.login_as(self.user)
-
-
-class TeamListTest(BaseTeamTest):
-    def test_loads(self):
-        resp = self.client.post(reverse('sentry-team-list'))
-        self.assertEquals(resp.status_code, 200)
-        self.assertTemplateUsed(resp, 'sentry/teams/list.html')
 
 
 class NewTeamTest(BaseTeamTest):
@@ -62,6 +55,7 @@ class NewTeamTest(BaseTeamTest):
         resp = self.client.post(self.path, {
             'name': 'Test Team',
             'slug': 'test',
+            'owner': self.user.username,
         })
         self.assertNotEquals(resp.status_code, 200)
 
@@ -161,42 +155,9 @@ class RemoveTeamTest(BaseTeamTest):
     @mock.patch('sentry.web.frontend.teams.can_remove_team', mock.Mock(return_value=True))
     def test_valid_params(self):
         resp = self.client.post(self.path)
-        self.assertNotEquals(resp.status_code, 200)
-        self.assertEquals(resp['Location'], 'http://testserver' + reverse('sentry-team-list'))
-        self.assertFalse(Team.objects.filter(pk=self.team.pk).exists())
-
-
-class SuspendTeamMemberTest(BaseTeamTest):
-    def test_cannot_suspend_owner(self):
-        resp = self.client.post(reverse('sentry-suspend-team-member', args=[self.team.slug, self.tm.id]))
-        self.assertEquals(resp.status_code, 302)
-        self.assertEquals(resp['Location'], 'http://testserver' + reverse('sentry-manage-team', args=[self.team.slug]))
-        tm = self.team.member_set.get(pk=self.tm2.id)
-        self.assertTrue(tm.is_active)
-
-    def test_does_suspend(self):
-        resp = self.client.get(reverse('sentry-suspend-team-member', args=[self.team.slug, self.tm2.id]))
-        self.assertEquals(resp.status_code, 302)
-        self.assertEquals(resp['Location'], 'http://testserver' + reverse('sentry-manage-team', args=[self.team.slug]))
-        tm = self.team.member_set.get(pk=self.tm2.id)
-        self.assertFalse(tm.is_active)
-
-
-class RestoreTeamMemberTest(BaseTeamTest):
-    def test_cannot_restore_owner(self):
-        resp = self.client.post(reverse('sentry-restore-team-member', args=[self.team.slug, self.tm.id]))
-        self.assertEquals(resp.status_code, 302)
-        self.assertEquals(resp['Location'], 'http://testserver' + reverse('sentry-manage-team', args=[self.team.slug]))
-        tm = self.team.member_set.get(pk=self.tm2.id)
-        self.assertTrue(tm.is_active)
-
-    def test_does_restore(self):
-        self.tm2.update(is_active=False)
-        resp = self.client.get(reverse('sentry-restore-team-member', args=[self.team.slug, self.tm2.id]))
-        self.assertEquals(resp.status_code, 302)
-        self.assertEquals(resp['Location'], 'http://testserver' + reverse('sentry-manage-team', args=[self.team.slug]))
-        tm = self.team.member_set.get(pk=self.tm2.id)
-        self.assertTrue(tm.is_active)
+        assert resp.status_code == 302
+        assert resp['Location'] == 'http://testserver' + reverse('sentry')
+        assert not Team.objects.filter(pk=self.team.pk).exists()
 
 
 class NewTeamMemberTest(BaseTeamTest):

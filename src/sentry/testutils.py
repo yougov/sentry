@@ -12,12 +12,10 @@ import base64
 from exam import Exam, fixture, before  # NOQA
 from functools import wraps
 
-from sentry.conf import settings
 from sentry.utils import json
 
-from django.conf import settings as django_settings
+from django.conf import settings
 from django.contrib.auth import login
-from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.core.management import call_command
 from django.core.urlresolvers import reverse
@@ -27,8 +25,8 @@ from django.test import TestCase, TransactionTestCase
 from django.test.client import Client
 from django.utils.importlib import import_module
 
-from sentry.models import (Project, ProjectOption, Option, Team, Group,
-    Event)
+from sentry.models import (
+    Project, ProjectOption, Option, Team, Group, Event, User)
 from sentry.utils.compat import pickle
 from sentry.utils.strings import decompress
 
@@ -73,24 +71,14 @@ class Settings(object):
     def __init__(self, **overrides):
         self.overrides = overrides
         self._orig = {}
-        self._orig_sentry = {}
 
     def __enter__(self):
         for k, v in self.overrides.iteritems():
-            self._orig[k] = getattr(django_settings, k, self.NotDefined)
-            setattr(django_settings, k, v)
-            if k.startswith('SENTRY_'):
-                nk = k.split('SENTRY_', 1)[1]
-                self._orig_sentry[nk] = getattr(settings, nk, self.NotDefined)
-                setattr(settings, nk, v)
+            self._orig[k] = getattr(settings, k, self.NotDefined)
+            setattr(settings, k, v)
 
     def __exit__(self, exc_type, exc_value, traceback):
         for k, v in self._orig.iteritems():
-            if v is self.NotDefined:
-                delattr(django_settings, k)
-            else:
-                setattr(django_settings, k, v)
-        for k, v in self._orig_sentry.iteritems():
             if v is self.NotDefined:
                 delattr(settings, k)
             else:
@@ -153,9 +141,9 @@ class BaseTestCase(Exam):
         assert resp['Location'] == 'http://testserver' + reverse('sentry-login')
 
     def login_as(self, user):
-        user.backend = django_settings.AUTHENTICATION_BACKENDS[0]
+        user.backend = settings.AUTHENTICATION_BACKENDS[0]
 
-        engine = import_module(django_settings.SESSION_ENGINE)
+        engine = import_module(settings.SESSION_ENGINE)
 
         request = HttpRequest()
         if self.client.session:
@@ -169,13 +157,13 @@ class BaseTestCase(Exam):
         request.session.save()
 
         # Set the cookie to represent the session.
-        session_cookie = django_settings.SESSION_COOKIE_NAME
+        session_cookie = settings.SESSION_COOKIE_NAME
         self.client.cookies[session_cookie] = request.session.session_key
         cookie_data = {
             'max-age': None,
             'path': '/',
-            'domain': django_settings.SESSION_COOKIE_DOMAIN,
-            'secure': django_settings.SESSION_COOKIE_SECURE or None,
+            'domain': settings.SESSION_COOKIE_DOMAIN,
+            'secure': settings.SESSION_COOKIE_SECURE or None,
             'expires': None,
         }
         self.client.cookies[session_cookie].update(cookie_data)
@@ -195,7 +183,7 @@ class BaseTestCase(Exam):
     def _postWithKey(self, data, key=None):
         resp = self.client.post(reverse('sentry-api-store'), {
             'data': self._makeMessage(data),
-            'key': settings.KEY,
+            'key': settings.SENTRY_KEY,
         })
         return resp
 
@@ -268,3 +256,19 @@ class TransactionTestCase(BaseTestCase, TransactionTestCase):
     def _fixture_teardown(self):
         for db in self._get_databases():
             call_command('flush', verbosity=0, interactive=False, database=db)
+
+
+def with_eager_tasks(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        from celery.app import app_or_default
+
+        app = app_or_default()
+        prev = app.conf.CELERY_ALWAYS_EAGER
+        app.conf.CELERY_ALWAYS_EAGER = True
+
+        try:
+            return func(*args, **kwargs)
+        finally:
+            app.conf.CELERY_ALWAYS_EAGER = prev
+    return wrapped

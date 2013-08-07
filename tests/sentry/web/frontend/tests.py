@@ -5,12 +5,10 @@ from __future__ import absolute_import
 import logging
 import json
 
-from django.contrib.auth.models import User
 from django.core.urlresolvers import reverse
 
-from sentry.conf import settings
-from sentry.constants import MEMBER_USER
-from sentry.models import Group, Project, TeamMember, Team
+from sentry.constants import MEMBER_USER, MAX_JSON_RESULTS
+from sentry.models import Group, Project, TeamMember, Team, User
 from sentry.testutils import TestCase, fixture, before
 
 logger = logging.getLogger(__name__)
@@ -223,7 +221,7 @@ class GroupEventListJsonTest(BaseViewTest):
 
     def test_does_not_allow_beyond_limit(self):
         self.login()
-        resp = self.client.get(self.path, {'limit': settings.MAX_JSON_RESULTS + 1})
+        resp = self.client.get(self.path, {'limit': MAX_JSON_RESULTS + 1})
         assert resp.status_code == 400
 
 
@@ -258,36 +256,21 @@ class ManageUsersTest(BaseViewTest):
         self.assertTemplateUsed(resp, 'sentry/admin/users/list.html')
 
 
-# class ReplayTest(BaseViewTest):
-#     @fixture
-#     def path(self):
-#         return reverse('sentry-replay', kwargs={
-#             'team_slug': self.team.slug,
-#             'project_id': self.project.slug,
-#             'group_id': self.group.id,
-#             'event_id': self.id,
-#         })
-
-#     def test_does_render(self):
-#         self.login()
-#         resp = self.client.get(self.id)
-#         self.assertEquals(resp.status_code, 200)
-#         self.assertTemplateUsed(resp, 'sentry/events/replay.html')
-
-
-class EventListTest(TestCase):
+class ReplayTest(BaseViewTest):
     @fixture
     def path(self):
-        return reverse('sentry-events', kwargs={
+        return reverse('sentry-replay', kwargs={
             'team_slug': self.team.slug,
-            'project_id': self.project.id,
+            'project_id': self.project.slug,
+            'group_id': self.group.id,
+            'event_id': self.event.id,
         })
 
     def test_does_render(self):
-        self.login_as(self.user)
+        self.login()
         resp = self.client.get(self.path)
-        assert resp.status_code == 200
-        self.assertTemplateUsed(resp, 'sentry/events/event_list.html')
+        self.assertEquals(resp.status_code, 200)
+        self.assertTemplateUsed(resp, 'sentry/events/replay_request.html')
 
 
 class PermissionBase(TestCase):

@@ -1,25 +1,36 @@
 VERSION = 2.0.0
-NPM_ROOT = node_modules
+NPM_ROOT = ./node_modules
 STATIC_DIR = src/sentry/static/sentry
 BOOTSTRAP_JS = ${STATIC_DIR}/scripts/lib/bootstrap.js
 BOOTSTRAP_JS_MIN = ${STATIC_DIR}/scripts/lib/bootstrap.min.js
 UGLIFY_JS ?= node_modules/uglify-js/bin/uglifyjs
 
+JS_TESTS = tests/js/index.html
+JS_REPORTER = dot
+
 develop: update-submodules
 	npm install -q
-	pip install -q "file://`pwd`#egg=sentry[dev]"
-	pip install -q "file://`pwd`#egg=sentry[tests]"
+	pip install -q "file://`pwd`#egg=sentry[dev]" --use-mirrors
+	pip install -q "file://`pwd`#egg=sentry[tests]" --use-mirrors
 	pip install -q -e . --use-mirrors
+	make setup-git
 
 dev-postgres:
-	pip install -q "file://`pwd`#egg=sentry[dev]"
-	pip install -q "file://`pwd`#egg=sentry[postgres]"
+	pip install -q "file://`pwd`#egg=sentry[dev]" --use-mirrors
+	pip install -q "file://`pwd`#egg=sentry[postgres]" --use-mirrors
 	pip install -q -e . --use-mirrors
 
 dev-mysql:
-	pip install -q "file://`pwd`#egg=sentry[dev]"
-	pip install -q "file://`pwd`#egg=sentry[mysql]"
+	pip install -q "file://`pwd`#egg=sentry[dev]" --use-mirrors
+	pip install -q "file://`pwd`#egg=sentry[mysql]" --use-mirrors
 	pip install -q -e . --use-mirrors
+
+dev-docs:
+	pip install -q -r docs/requirements.txt --use-mirrors
+
+setup-git:
+	git config branch.autosetuprebase always
+	cd .git/hooks && ln -sf ../../hooks/* ./
 
 build: locale
 
@@ -40,6 +51,7 @@ compile-bootstrap-js:
 	${UGLIFY_JS} -nc ${BOOTSTRAP_JS} > ${BOOTSTRAP_JS_MIN};
 
 install-test-requirements:
+	npm install -q
 	pip install -q "file://`pwd`#egg=sentry[tests]"
 
 update-submodules:
@@ -54,13 +66,16 @@ testloop: install-test-requirements
 
 test-cli:
 	@echo "Testing CLI"
-	rm -f test.conf
-	sentry init test.conf
-	sentry --config=test.conf help | grep start > /dev/null
+	rm -rf test_cli
+	mkdir test_cli
+	cd test_cli && sentry init test.conf
+	cd test_cli && sentry --config=test.conf upgrade --verbosity=0 --noinput
+	cd test_cli && sentry --config=test.conf help | grep start > /dev/null
+	rm -r test_cli
 
 test-js:
 	@echo "Running JavaScript tests"
-	${NPM_ROOT}/phantomjs/bin/phantomjs runtests.js tests/js/index.html
+	${NPM_ROOT}/.bin/mocha-phantomjs -p ${NPM_ROOT}/phantomjs/bin/phantomjs -R ${JS_REPORTER} ${JS_TESTS}
 	@echo ""
 
 test-python:
@@ -72,12 +87,12 @@ lint: lint-python lint-js
 
 lint-python:
 	@echo "Linting Python files"
-	flake8 --exclude=migrations,src/sentry/static/CACHE/* --ignore=E501,E225,E121,E123,E124,E125,E127,E128 src/sentry
+	PYFLAKES_NODOCTEST=1 flake8 src/sentry
 	@echo ""
 
 lint-js:
 	@echo "Linting JavaScript files"
-	@${NPM_ROOT}/jshint/bin/hint src/sentry/ || exit 1
+	@${NPM_ROOT}/.bin/jshint src/sentry/ || exit 1
 	@echo ""
 
 coverage: install-test-requirements

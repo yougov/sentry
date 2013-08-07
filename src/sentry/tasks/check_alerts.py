@@ -42,9 +42,10 @@ def check_alerts(**kwargs):
     qs = ProjectCountByMinute.objects.filter(
         date__lte=max_date,
         date__gt=min_date,
-        times_seen__gt=0,
     ).values_list('project_id', 'date', 'times_seen')
     for project_id, date, count in qs:
+        if not count:
+            continue  # shouldnt happen
         normalized_count = int(count / ((now - date).seconds / 60))
         check_project_alerts.delay(
             project_id=project_id,
@@ -60,17 +61,12 @@ def check_project_alerts(project_id, when, count, **kwargs):
     Given 'when' and 'count', which should signify recent times we compare it to historical data for this project
     and if over a given threshold, create an alert.
     """
-    from sentry.conf import settings
+    from sentry.constants import DEFAULT_ALERT_PROJECT_THRESHOLD
     from sentry.models import ProjectCountByMinute, ProjectOption, Alert
 
     # TODO: make this use the cache
-    try:
-        threshold, min_events = ProjectOption.objects.get(
-            project=project_id,
-            key='alert:threshold',
-        ).value
-    except ProjectOption.DoesNotExist:
-        threshold, min_events = settings.DEFAULT_ALERT_PROJECT_THRESHOLD
+    threshold, min_events = ProjectOption.objects.get_value(
+        project_id, 'alert:threshold', DEFAULT_ALERT_PROJECT_THRESHOLD)
 
     if not threshold and min_events:
         return

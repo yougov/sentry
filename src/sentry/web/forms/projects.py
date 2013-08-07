@@ -8,13 +8,12 @@ sentry.web.forms.projects
 import itertools
 from django import forms
 from django.contrib.auth import authenticate
-from django.contrib.auth.models import User
 from django.utils.translation import ugettext_lazy as _
 from sentry.constants import EMPTY_PASSWORD_VALUES
-from sentry.models import Project, ProjectOption
+from sentry.models import Project, ProjectOption, User
 from sentry.permissions import can_set_public_projects
-from sentry.web.forms.fields import (RadioFieldRenderer, UserField, OriginsField,
-    RangeField, get_team_choices)
+from sentry.web.forms.fields import (
+    RadioFieldRenderer, UserField, OriginsField, RangeField, get_team_choices)
 
 
 BLANK_CHOICE = [("", "")]
@@ -60,7 +59,7 @@ class NewProjectAdminForm(NewProjectForm):
     owner = UserField(required=False)
 
     class Meta:
-        fields = ('name', 'platform', 'owner')
+        fields = ('name', 'platform')
         model = Project
 
 
@@ -110,14 +109,15 @@ class RemoveProjectForm(forms.Form):
 class EditProjectForm(BaseProjectForm):
     public = forms.BooleanField(required=False,
         help_text=_('Imply public access to any event for this project.'))
-    team = forms.TypedChoiceField(choices=(), coerce=int)
+    team = forms.TypedChoiceField(choices=(), coerce=int, required=False)
     origins = OriginsField(label=_('Allowed Domains'), required=False,
         help_text=_('Separate multiple entries with a newline.'))
     resolve_age = RangeField(help_text=_('Treat an event as resolved if it hasn\'t been seen for this amount of time.'),
         required=False, min_value=0, max_value=168, step_value=1)
+    owner = UserField(required=False)
 
     class Meta:
-        fields = ('name', 'platform', 'public', 'team')
+        fields = ('name', 'platform', 'public', 'team', 'owner', 'slug')
         model = Project
 
     def __init__(self, request, team_list, data, instance, *args, **kwargs):
@@ -148,20 +148,13 @@ class EditProjectForm(BaseProjectForm):
         return self.team_list[value]
 
 
-class EditProjectAdminForm(EditProjectForm):
-    team = forms.ChoiceField(choices=(), required=False)
-    owner = UserField(required=False)
-
-    class Meta:
-        fields = ('name', 'platform', 'public', 'team', 'owner', 'slug')
-        model = Project
-
-
 class AlertSettingsForm(forms.Form):
-    pct_threshold = RangeField(label=_('Threshold'), help_text=_('Notify when an event increases by this percentage.'),
-        required=False, min_value=0, max_value=1000, step_value=100)
-    min_events = forms.IntegerField(label=_('Minimum Events'), help_text=_('Generate an alert only when an event is seen more than this many times during the interval.'),
-        required=False, min_value=0)
+    pct_threshold = RangeField(
+        label=_('Threshold'), required=False, min_value=0, max_value=1000, step_value=100,
+        help_text=_('Notify when the rate of events increases by this percentage.'))
+    min_events = forms.IntegerField(
+        label=_('Minimum Events'), required=False, min_value=0,
+        help_text=_('Generate an alert only when an event is seen more than this many times during the interval.'),)
 
 
 class NotificationTagValuesForm(forms.Form):

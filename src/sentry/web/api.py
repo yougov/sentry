@@ -9,30 +9,36 @@ import datetime
 import logging
 from functools import wraps
 
-from django.contrib.auth.models import AnonymousUser, User
+from django.contrib import messages
+from django.contrib.auth.models import AnonymousUser
 from django.core.urlresolvers import reverse
 from django.db.models import Sum, Q
 from django.http import HttpResponse, HttpResponseForbidden, HttpResponseRedirect
 from django.utils import timezone
-from django.views.decorators.cache import never_cache
+from django.utils.translation import ugettext as _
+from django.views.decorators.cache import never_cache, cache_control
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.vary import vary_on_cookie
 from django.views.generic.base import View as BaseView
-from sentry.conf import settings
-from sentry.constants import (MEMBER_USER, STATUS_MUTED, STATUS_UNRESOLVED,
-    STATUS_RESOLVED)
-from sentry.coreapi import (project_from_auth_vars,
-    decode_and_decompress_data, safely_load_json_string, validate_data,
-    insert_data_to_database, APIError, APIForbidden, extract_auth_vars)
+
+from sentry.constants import (
+    MEMBER_USER, STATUS_MUTED, STATUS_UNRESOLVED, STATUS_RESOLVED,
+    EVENTS_PER_PAGE)
+from sentry.coreapi import (
+    project_from_auth_vars, decode_and_decompress_data,
+    safely_load_json_string, validate_data, insert_data_to_database, APIError,
+    APIForbidden, extract_auth_vars)
 from sentry.exceptions import InvalidData
-from sentry.models import (Group, GroupBookmark, Project, ProjectCountByMinute,
-    FilterValue, Activity)
+from sentry.models import (
+    Group, GroupBookmark, Project, ProjectCountByMinute, TagValue, Activity,
+    User)
 from sentry.plugins import plugins
 from sentry.utils import json
 from sentry.utils.cache import cache
 from sentry.utils.db import has_trending
 from sentry.utils.javascript import to_json
 from sentry.utils.http import is_valid_origin, get_origins, is_same_domain
+from sentry.utils.safe import safe_execute
 from sentry.web.decorators import has_access
 from sentry.web.frontend.groups import _get_group_list
 from sentry.web.helpers import render_to_response
@@ -64,7 +70,7 @@ def api(func):
 class Auth(object):
     def __init__(self, auth_vars):
         self.client = auth_vars.get('sentry_client')
-        self.version = auth_vars.get('sentry_version')
+        self.version = int(float(auth_vars.get('sentry_version')))
         self.secret_key = auth_vars.get('sentry_secret')
         self.public_key = auth_vars.get('sentry_key')
 
@@ -153,14 +159,14 @@ class APIView(BaseView):
         try:
             project = self._get_project_from_id(project_id)
         except APIError, e:
-            return HttpResponse(str(e), status=400)
+            return HttpResponse(str(e), content_type='text/plain', status=400)
 
         origin = self.get_request_origin(request)
         if origin is not None:
             if not project:
                 return HttpResponse('Your client must be upgraded for CORS support.')
             elif not is_valid_origin(origin, project):
-                return HttpResponse('Invalid origin: %r' % origin, status=400)
+                return HttpResponse('Invalid origin: %r' % origin, content_type='text/plain', status=400)
 
         # XXX: It seems that the OPTIONS call does not always include custom headers
         if request.method == 'OPTIONS':
@@ -169,7 +175,7 @@ class APIView(BaseView):
             try:
                 auth_vars = self._parse_header(request, project)
             except APIError, e:
-                return HttpResponse(str(e), status=400)
+                return HttpResponse(str(e), content_type='text/plain', status=400)
 
             try:
                 project_, user = project_from_auth_vars(auth_vars)
@@ -182,14 +188,14 @@ class APIView(BaseView):
             # Legacy API was /api/store/ and the project ID was only available elsewhere
             if not project:
                 if not project_:
-                    return HttpResponse('Unable to identify project', status=400)
+                    return HttpResponse('Unable to identify project', content_type='text/plain', status=400)
                 project = project_
             elif project_ != project:
-                return HttpResponse('Project ID mismatch', status=400)
+                return HttpResponse('Project ID mismatch', content_type='text/plain', status=400)
 
             auth = Auth(auth_vars)
 
-            if auth.version == '3':
+            if auth.version >= 3:
                 # Version 3 enforces secret key for server side requests
                 if origin is None and not auth.secret_key:
                     return HttpResponse('Missing required attribute in authentication header: sentry_secret', status=400)
@@ -198,7 +204,7 @@ class APIView(BaseView):
                 response = super(APIView, self).dispatch(request, project=project, auth=auth, **kwargs)
 
             except APIError, error:
-                response = HttpResponse(unicode(error.msg), status=error.http_status)
+                response = HttpResponse(unicode(error.msg), content_type='text/plain', status=error.http_status)
 
         if origin:
             response['Access-Control-Allow-Origin'] = origin
@@ -248,19 +254,25 @@ class StoreView(APIView):
     @never_cache
     def post(self, request, project, auth, **kwargs):
         data = request.raw_post_data
-        event_id = self.process(request, project, auth, data, **kwargs)
+        response_or_event_id = self.process(request, project, auth, data, **kwargs)
+        if isinstance(response_or_event_id, HttpResponse):
+            return response_or_event_id
         return HttpResponse(json.dumps({
-            'id': event_id,
-        }))
+            'id': response_or_event_id,
+        }), content_type='application/json')
 
     @never_cache
     def get(self, request, project, auth, **kwargs):
         data = request.GET.get('sentry_data', '')
         self.process(request, project, auth, data, **kwargs)
         # We should return a simple 1x1 gif for browser so they don't throw a warning
-        return HttpResponse(PIXEL, content_type='image/gif')
+        return HttpResponse(PIXEL, 'image/gif')
 
     def process(self, request, project, auth, data, **kwargs):
+        for plugin in plugins.all():
+            if safe_execute(plugin.is_rate_limited, project=project):
+                return HttpResponse('Creation of this event was denied due to rate limiting.', content_type='text/plain', status=405)
+
         result = plugins.first('has_perm', request.user, 'create_event', project)
         if result is False:
             raise APIForbidden('Creation of this event was blocked')
@@ -294,7 +306,7 @@ class StoreView(APIView):
 @api
 def poll(request, team, project):
     offset = 0
-    limit = settings.MESSAGES_PER_PAGE
+    limit = EVENTS_PER_PAGE
 
     response = _get_group_list(
         request=request,
@@ -459,17 +471,21 @@ def unresolve_group(request, team, project, group_id):
 @has_access(MEMBER_USER)
 @never_cache
 def remove_group(request, team, project, group_id):
+    from sentry.tasks.deletion import delete_group
+
     try:
         group = Group.objects.get(pk=group_id)
     except Group.DoesNotExist:
         return HttpResponseForbidden()
 
-    group.delete()
+    delete_group.delay(object_id=group.id)
 
     if request.is_ajax():
         response = HttpResponse('{}')
         response['Content-Type'] = 'application/json'
     else:
+        messages.add_message(request, messages.SUCCESS,
+            _('Deletion has been queued and should occur shortly.'))
         response = HttpResponseRedirect(reverse('sentry-stream', args=[team.slug, project.slug]))
     return response
 
@@ -698,7 +714,7 @@ def get_stats(request, team=None, project=None):
     # XXX: This is too slow if large amounts of groups are resolved
     num_resolved = Group.objects.filter(
         project__in=project_list,
-        status=1,
+        status=STATUS_RESOLVED,
         resolved_at__gte=cutoff_dt,
     ).aggregate(t=Sum('times_seen'))['t'] or 0
 
@@ -721,7 +737,7 @@ def search_tags(request, team, project):
     name = request.GET['name']
     query = request.GET['query']
 
-    results = list(FilterValue.objects.filter(
+    results = list(TagValue.objects.filter(
         project=project,
         key=name,
         value__icontains=query,
@@ -778,12 +794,14 @@ def search_projects(request, team):
     return response
 
 
+@cache_control(max_age=3600, public=True)
 def crossdomain_xml_index(request):
     response = render_to_response('sentry/crossdomain_index.xml')
     response['Content-Type'] = 'application/xml'
     return response
 
 
+@cache_control(max_age=60)
 def crossdomain_xml(request, project_id):
     if project_id.isdigit():
         lookup = {'id': project_id}

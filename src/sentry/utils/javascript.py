@@ -5,6 +5,8 @@ sentry.utils.javascript
 :copyright: (c) 2010-2013 by the Sentry Team, see AUTHORS for more details.
 :license: BSD, see LICENSE for more details.
 """
+import time
+
 from django.core.urlresolvers import reverse
 from django.utils.html import escape
 from sentry.app import env
@@ -93,7 +95,6 @@ class GroupTransformer(Transformer):
         d = {
             'id': str(obj.id),
             'count': str(obj.times_seen),
-            'userCount': str(obj.users_seen),
             'title': escape(obj.message_top()),
             'message': escape(obj.error()),
             'level': obj.level,
@@ -111,6 +112,7 @@ class GroupTransformer(Transformer):
                 'name': obj.project.name,
                 'slug': obj.project.slug,
             },
+            'version': time.time(),
         }
         if hasattr(obj, 'is_bookmarked'):
             d['isBookmarked'] = obj.is_bookmarked

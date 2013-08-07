@@ -9,17 +9,14 @@ sentry.web.helpers
 import logging
 import warnings
 
-from urlparse import urlparse
-
-from django.conf import settings as dj_settings
+from django.conf import settings
 from django.core.urlresolvers import reverse, resolve
 from django.http import HttpResponse
 from django.template import loader, RequestContext, Context
 from django.utils.datastructures import SortedDict
 from django.utils.safestring import mark_safe
 
-from sentry.conf import settings
-from sentry.constants import MEMBER_OWNER
+from sentry.constants import MEMBER_OWNER, EVENTS_PER_PAGE
 from sentry.models import Project, Team, Option, ProjectOption, ProjectKey
 
 logger = logging.getLogger('sentry.errors')
@@ -71,27 +68,27 @@ def get_login_url(reset=False, request=None):
         # if LOGIN_URL resolves force login_required to it instead of our own
         # XXX: this must be done as late as possible to avoid idempotent requirements
         try:
-            resolve(dj_settings.LOGIN_URL)
+            resolve(settings.LOGIN_URL)
         except Exception:
-            _LOGIN_URL = settings.LOGIN_URL
+            _LOGIN_URL = settings.SENTRY_LOGIN_URL
         else:
-            _LOGIN_URL = dj_settings.LOGIN_URL
+            _LOGIN_URL = settings.LOGIN_URL
 
         if _LOGIN_URL is None:
             _LOGIN_URL = reverse('sentry-login')
 
-    if dj_settings.LOGIN_URL_NEXT_PARAM:
-        host = dj_settings.SENTRY_URL_PREFIX \
-                if 'SENTRY_URL_PREFIX' in dj_settings \
+    if settings.LOGIN_URL_NEXT_PARAM:
+        host = settings.SENTRY_URL_PREFIX \
+                if 'SENTRY_URL_PREFIX' in settings \
                 else request.build_absolute_uri().split('?')[0]
         return '%s?%s=%s' % (_LOGIN_URL,
-                dj_settings.LOGIN_URL_NEXT_PARAM, host)
+                settings.LOGIN_URL_NEXT_PARAM, host)
     return _LOGIN_URL
 
 
 def get_internal_project():
     try:
-        project = Project.objects.get(id=settings.PROJECT)
+        project = Project.objects.get(id=settings.SENTRY_PROJECT)
     except Project.DoesNotExist:
         return {}
     try:
@@ -109,9 +106,9 @@ def get_default_context(request, existing_context=None, team=None):
     from sentry.plugins import plugins
 
     context = {
-        'HAS_SEARCH': settings.USE_SEARCH,
-        'MESSAGES_PER_PAGE': settings.MESSAGES_PER_PAGE,
-        'URL_PREFIX': settings.URL_PREFIX,
+        'HAS_SEARCH': settings.SENTRY_USE_SEARCH,
+        'EVENTS_PER_PAGE': EVENTS_PER_PAGE,
+        'URL_PREFIX': settings.SENTRY_URL_PREFIX,
         'PLUGINS': plugins,
     }
 
@@ -123,15 +120,21 @@ def get_default_context(request, existing_context=None, team=None):
             'request': request,
         })
         if team:
+            # TODO: remove this extra query
             context.update({
-                'can_admin_team': Team.objects.get_for_user(request.user, MEMBER_OWNER),
+                'can_admin_team': [team in Team.objects.get_for_user(request.user, MEMBER_OWNER)],
             })
 
-        if not existing_context or 'PROJECT_LIST' not in existing_context:
-            project_list = Project.objects.get_for_user(request.user, team=team)
-            context['PROJECT_LIST'] = sorted(project_list, key=lambda x: x.name)
         if not existing_context or 'TEAM_LIST' not in existing_context:
-            context['TEAM_LIST'] = sorted(Team.objects.get_for_user(request.user).values(), key=lambda x: x.name)
+            context['TEAM_LIST'] = Team.objects.get_for_user(
+                request.user, with_projects=True).values()
+
+        if not existing_context or 'PROJECT_LIST' not in existing_context:
+            # HACK:
+            for t, p_list in context['TEAM_LIST']:
+                if t == team:
+                    context['PROJECT_LIST'] = p_list
+                    break
 
     return context
 
@@ -219,4 +222,4 @@ def plugin_config(plugin, project, request):
 
 
 def get_raven_js_url():
-    return settings.RAVEN_JS_URL
+    return settings.SENTRY_RAVEN_JS_URL

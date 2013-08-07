@@ -15,21 +15,23 @@ import datetime
 import logging
 import re
 
+from django.conf import settings
 from django.core.urlresolvers import reverse
 from django.db.models import Q
 from django.http import HttpResponse, HttpResponseRedirect, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
-from sentry.conf import settings
-from sentry.constants import (SORT_OPTIONS, SEARCH_SORT_OPTIONS,
-    SORT_CLAUSES, MYSQL_SORT_CLAUSES, SQLITE_SORT_CLAUSES, MEMBER_USER,
+from sentry.constants import (
+    SORT_OPTIONS, SEARCH_SORT_OPTIONS, SORT_CLAUSES,
+    MYSQL_SORT_CLAUSES, SQLITE_SORT_CLAUSES, MEMBER_USER,
     SCORE_CLAUSES, MYSQL_SCORE_CLAUSES, SQLITE_SCORE_CLAUSES,
     ORACLE_SORT_CLAUSES, ORACLE_SCORE_CLAUSES,
-    MSSQL_SORT_CLAUSES, MSSQL_SCORE_CLAUSES)
+    MSSQL_SORT_CLAUSES, MSSQL_SCORE_CLAUSES, DEFAULT_SORT_OPTION,
+    SEARCH_DEFAULT_SORT_OPTION, MAX_JSON_RESULTS)
 from sentry.filters import get_filters
-from sentry.models import (Project, Group, Event, SearchDocument, Activity,
-    EventMapping)
+from sentry.models import (
+    Project, Group, Event, SearchDocument, Activity, EventMapping, TagKey)
 from sentry.permissions import can_admin_group, can_create_projects
 from sentry.plugins import plugins
 from sentry.utils import json
@@ -73,6 +75,7 @@ def _get_group_list(request, project):
     time_from = request.GET.get('tf')
     date_to = request.GET.get('dt')
     time_to = request.GET.get('tt')
+    date_type = request.GET.get('date_type')
 
     today = timezone.now()
 
@@ -83,26 +86,32 @@ def _get_group_list(request, project):
         date_from = today - datetime.timedelta(days=5)
         date_to = None
 
-    if date_from and date_to:
-        event_list = event_list.filter(
-            groupcountbyminute__date__gte=date_from,
-            groupcountbyminute__date__lte=date_to,
-        )
-    elif date_from:
-        event_list = event_list.filter(last_seen__gte=date_from)
-    elif date_to:
-        event_list = event_list.filter(last_seen__lte=date_to)
+    if date_type == 'first_seen':
+        if date_from:
+            event_list = event_list.filter(first_seen__gte=date_from)
+        elif date_to:
+            event_list = event_list.filter(first_seen__lte=date_to)
+    else:
+        if date_from and date_to:
+            event_list = event_list.filter(
+                groupcountbyminute__date__gte=date_from,
+                groupcountbyminute__date__lte=date_to,
+            )
+        elif date_from:
+            event_list = event_list.filter(last_seen__gte=date_from)
+        elif date_to:
+            event_list = event_list.filter(last_seen__lte=date_to)
 
     sort = request.GET.get('sort') or request.session.get('streamsort')
     if sort not in SORT_OPTIONS:
-        sort = settings.DEFAULT_SORT_OPTION
+        sort = DEFAULT_SORT_OPTION
 
     # Save last sort in session
     if sort != request.session.get('streamsort'):
         request.session['streamsort'] = sort
 
     if sort.startswith('accel_') and not has_trending():
-        sort = settings.DEFAULT_SORT_OPTION
+        sort = DEFAULT_SORT_OPTION
 
     engine = get_db_engine('default')
     if engine.startswith('sqlite'):
@@ -143,7 +152,7 @@ def _get_group_list(request, project):
         if cursor:
             event_list = event_list.extra(
                 where=['%s > %%s' % filter_clause],
-                params=[cursor],
+                params=[float(cursor)],
             )
 
     return {
@@ -153,16 +162,16 @@ def _get_group_list(request, project):
         'date_to': date_to,
         'today': today,
         'sort': sort,
+        'date_type': date_type
     }
 
 
-def render_with_group_context(group, template, context, request=None, event=None):
+def render_with_group_context(group, template, context, request=None, event=None, is_public=False):
     context.update({
         'team': group.project.team,
         'project': group.project,
         'group': group,
         'can_admin_event': can_admin_group(request.user, group),
-        'SECTION': 'events',
     })
 
     if event:
@@ -181,13 +190,18 @@ def render_with_group_context(group, template, context, request=None, event=None
             next_event = None
             prev_event = None
 
-        extra_data = event.data.get('extra', {})
-        if not isinstance(extra_data, dict):
-            extra_data = {}
+        if not is_public:
+            extra_data = event.data.get('extra', {})
+            if not isinstance(extra_data, dict):
+                extra_data = {}
+
+            context.update({
+                'tags': event.get_tags(),
+                'json_data': extra_data,
+            })
 
         context.update({
             'event': event,
-            'json_data': extra_data,
             'version_data': event.data.get('modules', None),
             'next_event': next_event,
             'prev_event': prev_event,
@@ -221,7 +235,6 @@ def dashboard(request, team):
     return render_to_response('sentry/dashboard.html', {
         'team': team,
         'project_list': project_list,
-        'SECTION': 'events',
     }, request)
 
 
@@ -236,7 +249,6 @@ def wall_display(request, team):
     return render_to_response('sentry/wall.html', {
         'team': team,
         'project_list': project_list,
-        'SECTION': 'events',
     }, request)
 
 
@@ -250,7 +262,7 @@ def search(request, team, project):
 
     sort = request.GET.get('sort')
     if sort not in SEARCH_SORT_OPTIONS:
-        sort = settings.SEARCH_DEFAULT_SORT_OPTION
+        sort = SEARCH_DEFAULT_SORT_OPTION
     sort_label = SEARCH_SORT_OPTIONS[sort]
 
     result = event_re.match(query)
@@ -264,7 +276,6 @@ def search(request, team, project):
             return render_to_response('sentry/invalid_message_id.html', {
                 'team': team,
                 'project': project,
-                'SECTION': 'events',
             }, request)
         else:
             return HttpResponseRedirect(reverse('sentry-group', kwargs={
@@ -285,7 +296,6 @@ def search(request, team, project):
                 return render_to_response('sentry/invalid_message_id.html', {
                     'team': team,
                     'project': project,
-                    'SECTION': 'events',
                 }, request)
             else:
                 return HttpResponseRedirect(reverse('sentry-group-event', kwargs={
@@ -300,7 +310,7 @@ def search(request, team, project):
                 'team_slug': team.slug,
                 'group_id': group_id,
             }))
-    elif not settings.USE_SEARCH:
+    elif not settings.SENTRY_USE_SEARCH:
         event_list = Group.objects.none()
         # return render_to_response('sentry/invalid_message_id.html', {
         #         'project': project,
@@ -323,7 +333,6 @@ def search(request, team, project):
         'query': query,
         'sort': sort,
         'sort_label': sort_label,
-        'SECTION': 'events',
     }, request)
 
 
@@ -350,6 +359,7 @@ def group_list(request, team, project):
         'project': project,
         'from_date': response['date_from'],
         'to_date': response['date_to'],
+        'date_type': response['date_type'],
         'has_realtime': has_realtime,
         'event_list': response['event_list'],
         'today': response['today'],
@@ -358,33 +368,54 @@ def group_list(request, team, project):
         'filters': response['filters'],
         'SORT_OPTIONS': SORT_OPTIONS,
         'HAS_TRENDING': has_trending(),
-        'SECTION': 'events',
     }, request)
 
 
-@has_group_access
-def group(request, team, project, group):
+@has_group_access(allow_public=True)
+def group(request, team, project, group, event_id=None):
     # It's possible that a message would not be created under certain
     # circumstances (such as a post_save signal failing)
-    event = group.get_latest_event() or Event()
-    event.group = group
+    activity_qs = Activity.objects.order_by('-datetime').select_related('user')
+    if event_id:
+        event = get_object_or_404(group.event_set, id=event_id)
+        activity_qs = activity_qs.filter(
+            Q(event=event) | Q(event__isnull=True),
+        )
+    else:
+        event = group.get_latest_event() or Event()
 
-    activity = list(Activity.objects.filter(
-        group=group,
-    ).order_by('-datetime').select_related('user')[:10])
+    # bind params to group in case they get hit
+    event.group = group
+    event.project = project
+
+    # filter out dupes
+    activity_items = set()
+    activity = []
+    for item in activity_qs.filter(group=group)[:10]:
+        sig = (item.event_id, item.type, item.ident, item.user_id)
+        if sig not in activity_items:
+            activity_items.add(sig)
+            activity.append(item)
+
+    # trim to latest 5
+    activity = activity[:5]
 
     context = {
         'page': 'details',
         'activity': activity,
     }
 
-    if group_is_public(group, request.user):
+    is_public = group_is_public(group, request.user)
+
+    if is_public:
         template = 'sentry/groups/public_details.html'
         context['PROJECT_LIST'] = [project]
     else:
         template = 'sentry/groups/details.html'
 
-    return render_with_group_context(group, template, context, request, event=event)
+    return render_with_group_context(
+        group, template, context, request,
+        event=event, is_public=is_public)
 
 
 @has_group_access
@@ -394,12 +425,12 @@ def group_tag_list(request, team, project, group):
 
     # O(N) db access
     tag_list = []
-    for tag_name in group.get_tags():
-        tag_list.append((tag_name, [
+    for tag_key in TagKey.objects.filter(project=project, key__in=group.get_tags()):
+        tag_list.append((tag_key, [
             (value, times_seen, percent(group.times_seen, times_seen))
             for (value, times_seen, first_seen, last_seen)
-            in group.get_unique_tags(tag_name)[:5]
-        ]))
+            in group.get_unique_tags(tag_key.key)[:5]
+        ], group.get_unique_tags(tag_key.key).count()))
 
     return render_with_group_context(group, 'sentry/groups/tag_list.html', {
         'page': 'tag_list',
@@ -431,33 +462,17 @@ def group_event_list(request, team, project, group):
 def group_event_list_json(request, team, project, group_id):
     group = get_object_or_404(Group, id=group_id, project=project)
 
-    limit = request.GET.get('limit', settings.MAX_JSON_RESULTS)
+    limit = request.GET.get('limit', MAX_JSON_RESULTS)
     try:
         limit = int(limit)
     except ValueError:
         return HttpResponse('non numeric limit', status=400, mimetype='text/plain')
-    if limit > settings.MAX_JSON_RESULTS:
+    if limit > MAX_JSON_RESULTS:
         return HttpResponse("too many objects requested", mimetype='text/plain', status=400)
 
     events = group.event_set.order_by('-id')[:limit]
 
     return HttpResponse(json.dumps([event.as_dict() for event in events]), mimetype='application/json')
-
-
-@has_group_access
-def group_event_details(request, team, project, group, event_id):
-    event = get_object_or_404(group.event_set, id=event_id)
-
-    activity = list(Activity.objects.filter(
-        group=group,
-    ).filter(
-        Q(event=event) | Q(event__isnull=True),
-    ).order_by('-datetime').select_related('user')[:10])
-
-    return render_with_group_context(group, 'sentry/groups/details.html', {
-        'page': 'details',
-        'activity': activity,
-    }, request, event=event)
 
 
 @has_access(MEMBER_USER)

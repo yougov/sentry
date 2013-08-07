@@ -7,6 +7,15 @@ sentry.templatetags.sentry_helpers
 """
 # XXX: Import django-paging's template tags so we don't have to worry about
 #      INSTALLED_APPS
+
+import datetime
+import os.path
+
+from collections import namedtuple
+from paging.helpers import paginate as paginate_func
+from pkg_resources import parse_version as Version
+from urllib import quote
+
 from django import template
 from django.template import RequestContext
 from django.template.defaultfilters import stringfilter
@@ -14,10 +23,9 @@ from django.template.loader import render_to_string
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext as _
-from paging.helpers import paginate as paginate_func
-from sentry.conf import settings
-from sentry.constants import STATUS_MUTED
-from sentry.models import Group
+
+from sentry.constants import STATUS_MUTED, EVENTS_PER_PAGE
+from sentry.models import Group, Option
 from sentry.web.helpers import group_is_public
 from sentry.utils import to_unicode
 from sentry.utils.avatar import get_gravatar_url
@@ -29,7 +37,9 @@ from sentry.web.helpers import get_login_url
 from templatetag_sugar.register import tag
 from templatetag_sugar.parser import Name, Variable, Constant, Optional
 
-import datetime
+SentryVersion = namedtuple('SentryVersion', ['current', 'latest',
+                                             'update_available'])
+
 
 register = template.Library()
 
@@ -52,6 +62,17 @@ def pprint(value, break_after=10):
     return mark_safe(u'<span></span>'.join(
         [escape(value[i:(i + break_after)]) for i in xrange(0, len(value), break_after)]
     ))
+
+
+@register.filter
+def is_url(value):
+    if not isinstance(value, basestring):
+        return False
+    if not value.startswith(('http://', 'https://')):
+        return False
+    if ' ' in value:
+        return False
+    return True
 
 
 # seriously Django?
@@ -107,10 +128,18 @@ def is_none(value):
     return value is None
 
 
-@register.simple_tag
-def sentry_version():
+@register.simple_tag(takes_context=True)
+def get_sentry_version(context):
     import sentry
-    return sentry.get_version()
+    current = sentry.get_version()
+
+    latest = Option.objects.get_value('sentry:latest_version', current)
+    update_available = Version(latest) > Version(current)
+
+    context['sentry_version'] = SentryVersion(
+        current, latest, update_available
+    )
+    return ''
 
 
 @register.filter
@@ -161,7 +190,7 @@ def duration(value):
                 Constant('from'), Variable('request'),
                 Optional([Constant('as'), Name('asvar')]),
                 Optional([Constant('per_page'), Variable('per_page')])])
-def paginate(context, queryset_or_list, request, asvar=None, per_page=settings.MESSAGES_PER_PAGE):
+def paginate(context, queryset_or_list, request, asvar=None, per_page=EVENTS_PER_PAGE):
     """{% paginate queryset_or_list from request as foo[ per_page 25] %}"""
     result = paginate_func(request, queryset_or_list, per_page, endless=True)
 
@@ -180,7 +209,7 @@ def paginate(context, queryset_or_list, request, asvar=None, per_page=settings.M
                 Constant('from'), Variable('request'),
                 Optional([Constant('as'), Name('asvar')]),
                 Optional([Constant('per_page'), Variable('per_page')])])
-def paginator(context, queryset_or_list, request, asvar=None, per_page=settings.MESSAGES_PER_PAGE):
+def paginator(context, queryset_or_list, request, asvar=None, per_page=EVENTS_PER_PAGE):
     """{% paginator queryset_or_list from request as foo[ per_page 25] %}"""
     result = paginate_func(request, queryset_or_list, per_page, endless=True)
 
@@ -257,10 +286,10 @@ def get_project_dsn(context, user, project, asvar):
         return ''
 
     try:
-        key = ProjectKey.objects.get(user=user, project=project)
+        key = ProjectKey.objects.filter(user=None, project=project)[0]
     except ProjectKey.DoesNotExist:
         try:
-            key = ProjectKey.objects.filter(user=None, project=project)[0]
+            key = ProjectKey.objects.get(user=user, project=project)
         except IndexError:
             context[asvar] = None
         else:
@@ -361,9 +390,15 @@ def github_button(user, repo):
 
 @register.inclusion_tag('sentry/partial/data_values.html')
 def render_values(value, threshold=5, collapse_to=3):
-    is_dict = isinstance(value, dict)
+    if isinstance(value, (list, tuple)):
+        value = dict(enumerate(value))
+        is_list, is_dict = True, True
+    else:
+        is_list, is_dict = False, isinstance(value, dict)
+
     context = {
         'is_dict': is_dict,
+        'is_list': is_list,
         'threshold': threshold,
         'collapse_to': collapse_to,
     }
@@ -415,3 +450,24 @@ def recent_alerts(context, project, asvar):
 @register.simple_tag(takes_context=True)
 def login_url(context):
     return get_login_url(request=context['request'])
+
+
+@register.filter
+def reorder_teams(team_list, team):
+    pending = []
+    for t, p_list in team_list:
+        if t == team:
+            pending.insert(0, (t, p_list))
+        else:
+            pending.append((t, p_list))
+    return pending
+
+
+@register.filter
+def urlquote(value, safe=''):
+    return quote(value.encode('utf8'), safe)
+
+
+@register.filter
+def basename(value):
+    return os.path.basename(value)

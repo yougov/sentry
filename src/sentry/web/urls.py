@@ -15,8 +15,9 @@ except ImportError:
     from django.conf.urls.defaults import include, patterns, url  # NOQA
 
 from sentry.web import api
-from sentry.web.frontend import (alerts, accounts, generic, groups, events,
-    projects, admin, docs, teams, users)
+from sentry.web.frontend import (
+    alerts, accounts, generic, groups, events,
+    projects, admin, docs, teams, users, explore, explore_code)
 
 __all__ = ('urlpatterns',)
 
@@ -63,8 +64,6 @@ urlpatterns = patterns('',
     url(r'^account/settings/social/', include('social_auth.urls')),
 
     # Settings - Teams
-    url(r'^account/teams/$', teams.team_list,
-        name='sentry-team-list'),
     url(r'^account/teams/new/$', teams.create_new_team,
         name='sentry-new-team'),
     url(r'^account/teams/(?P<team_slug>[\w_-]+)/settings/$', teams.manage_team,
@@ -95,10 +94,6 @@ urlpatterns = patterns('',
         name='sentry-edit-team-member'),
     url(r'^account/teams/(?P<team_slug>[\w_-]+)/members/(?P<member_id>\d+)/remove/$', teams.remove_team_member,
         name='sentry-remove-team-member'),
-    url(r'^account/teams/(?P<team_slug>[\w_-]+)/members/(?P<member_id>\d+)/suspend/$', teams.suspend_team_member,
-        name='sentry-suspend-team-member'),
-    url(r'^account/teams/(?P<team_slug>[\w_-]+)/members/(?P<member_id>\d+)/restore/$', teams.restore_team_member,
-        name='sentry-restore-team-member'),
     url(r'^account/teams/(?P<team_slug>[\w_-]+)/members/pending/(?P<member_id>\d+)/remove/$', teams.remove_pending_team_member,
         name='sentry-remove-pending-team-member'),
     url(r'^account/teams/(?P<team_slug>[\w_-]+)/members/pending/(?P<member_id>\d+)/reinvite/$', teams.reinvite_pending_team_member,
@@ -120,7 +115,7 @@ urlpatterns = patterns('',
     url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/keys/$', projects.manage_project_keys,
         name='sentry-manage-project-keys'),
     url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/keys/new/$', projects.new_project_key,
-        name='-key'),
+        name='sentry-new-project-key'),
     url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/keys/(?P<key_id>\d+)/remove/$', projects.remove_project_key,
         name='sentry-remove-project-key'),
     url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/plugins/$', projects.manage_plugins,
@@ -237,13 +232,29 @@ urlpatterns = patterns('',
     url(r'^(?P<team_slug>[\w_-]+)/show/alerts/$', alerts.alert_list,
         name='sentry-alerts'),
 
-    # Users
-    url(r'^(?P<team_slug>[\w_-]+)/explore/users/$', users.user_list,
-        name='sentry-users'),
-    url(r'^(?P<team_slug>[\w_-]+)/explore/users/(?P<user_id>\d+)/$', users.user_details,
-        name='sentry-user-details'),
+    # Explore - Users
+    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/explore/users/$',
+        users.user_list, name='sentry-users'),
+    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/explore/users/(?P<user_id>\d+)/$', users.user_details, name='sentry-user-details'),
 
-    # Project specific
+    # Explore - Code
+    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/explore/code/$', explore_code.list_tag,
+        {'selection': 'filenames'}, name='sentry-explore-code'),
+    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/explore/code/by/function/$', explore_code.list_tag,
+        {'selection': 'functions'}, name='sentry-explore-code-by-function'),
+    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/explore/code/by/filename/(?P<tag_id>\d+)/$',
+        explore_code.tag_details, {'selection': 'filenames'}, name='sentry-explore-code-details'),
+    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/explore/code/by/function/(?P<tag_id>\d+)/$',
+        explore_code.tag_details, {'selection': 'functions'}, name='sentry-explore-code-details-by-function'),
+
+    # Explore
+    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/explore/$', explore.tag_list,
+        name='sentry-explore'),
+    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/explore/(?P<key>[^\/]+)/$', explore.tag_value_list,
+        name='sentry-explore-tag'),
+    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/explore/(?P<key>[^\/]+)/(?P<value_id>\d+)/$', explore.tag_value_details,
+        name='sentry-explore-tag-value'),
+
     url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/get-started/$', projects.get_started,
         name='sentry-get-started'),
     url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/group/(?P<group_id>\d+)/$', groups.group,
@@ -252,8 +263,10 @@ urlpatterns = patterns('',
         name='sentry-group-events'),
     url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/group/(?P<group_id>\d+)/events/json/$', groups.group_event_list_json,
         name='sentry-group-events-json'),
-    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/group/(?P<group_id>\d+)/events/(?P<event_id>\d+)/$', groups.group_event_details,
+    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/group/(?P<group_id>\d+)/events/(?P<event_id>\d+)/$', groups.group,
         name='sentry-group-event'),
+    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/group/(?P<group_id>\d+)/events/(?P<event_id>\d+)/replay/$', events.replay_event,
+        name='sentry-replay'),
     url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/group/(?P<group_id>\d+)/events/(?P<event_id_or_latest>(\d+|latest))/json/$', groups.group_event_details_json,
         name='sentry-group-event-json'),
     url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/group/(?P<group_id>\d+)/actions/(?P<slug>[\w_-]+)/', groups.group_plugin_action,
@@ -262,10 +275,6 @@ urlpatterns = patterns('',
         name='sentry-group-tags'),
     url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/group/(?P<group_id>\d+)/tags/(?P<tag_name>[^/]+)/$', groups.group_tag_details,
         name='sentry-group-tag-details'),
-    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/events/$', events.event_list,
-        name='sentry-events'),
-    url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/events/(?P<event_id>\d+)/replay/$', events.replay_event,
-        name='sentry-replay'),
     url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/search/$', groups.search,
         name='sentry-search'),
     url(r'^(?P<team_slug>[\w_-]+)/(?P<project_id>[\w_-]+)/alerts/$', alerts.alert_list,

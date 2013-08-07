@@ -127,6 +127,9 @@ is not a fully supported database and should not be used in production**.
             'PASSWORD': '',
             'HOST': '',
             'PORT': '',
+            'OPTIONS': {
+                'autocommit': True,
+            }
         }
     }
 
@@ -195,7 +198,8 @@ thing you'll want to run when upgrading to future versions of Sentry.
 Starting the Web Service
 ------------------------
 
-Sentry provides a built-in webserver (powered by gunicorn and eventlet) to get you off the ground quickly.
+Sentry provides a built-in webserver (powered by gunicorn and eventlet) to get you off the ground quickly, 
+also you can setup Sentry as WSGI application, in that case skip to section `Running Sentry as WSGI application`. 
 
 To start the webserver, you simply use ``sentry start``. If you opted to use an alternative configuration path
 you can pass that via the --config option.
@@ -239,6 +243,19 @@ You'll use the builtin HttpProxyModule within Nginx to handle proxying::
       proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
       proxy_set_header   X-Forwarded-Proto $scheme;
     }
+
+See :doc:`nginx` for more details on using Nginx.
+
+Enabling SSL
+~~~~~~~~~~~~~
+
+If you are planning to use SSL, you will also need to ensure that you've
+enabled detection within the reverse proxy (see the instructions above), as
+well as within the Sentry configuration:
+
+::
+
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 Running Sentry as a Service
 ---------------------------

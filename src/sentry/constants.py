@@ -7,9 +7,24 @@ These settings act as the default (base) settings for the Sentry-provided web-se
 :copyright: (c) 2010-2013 by the Sentry Team, see AUTHORS for more details.
 :license: BSD, see LICENSE for more details.
 """
+import logging
+import os.path
 
+from django.conf import settings
 from django.utils.datastructures import SortedDict
 from django.utils.translation import ugettext_lazy as _
+
+
+def get_all_languages():
+    results = []
+    for path in os.listdir(os.path.join(MODULE_ROOT, 'locale')):
+        if path.startswith('.'):
+            continue
+        results.append(path)
+    return results
+
+MODULE_ROOT = os.path.dirname(__import__('sentry').__file__)
+DATA_ROOT = os.path.join(MODULE_ROOT, 'data')
 
 SORT_OPTIONS = SortedDict((
     ('priority', _('Priority')),
@@ -103,6 +118,10 @@ PLATFORM_LIST = (
     'flask',
     'ios',
     'java',
+    'java_log4j',
+    'java_log4j2',
+    'java_logback',
+    'java_logging',
     'javascript',
     'node.js',
     'php',
@@ -110,22 +129,31 @@ PLATFORM_LIST = (
     'r',
     'ruby',
     'rails3',
+    'rails4',
     'sidekiq',
     'sinatra',
+    'tornado',
 )
 
 PLATFORM_ROOTS = {
     'rails3': 'ruby',
+    'rails4': 'ruby',
     'sinatra': 'ruby',
     'sidekiq': 'ruby',
     'django': 'python',
     'flask': 'python',
+    'tornado': 'python',
     'express': 'node.js',
     'connect': 'node.js',
+    'java_log4j': 'java',
+    'java_log4j2': 'java',
+    'java_logback': 'java',
+    'java_logging': 'java',
 }
 
 PLATFORM_TITLES = {
     'rails3': 'Rails 3 (Ruby)',
+    'rails4': 'Rails 4 (Ruby)',
     'php': 'PHP',
     'ios': 'iOS',
     'express': 'Express (Node.js)',
@@ -133,9 +161,62 @@ PLATFORM_TITLES = {
     'django': 'Django (Python)',
     'flask': 'Flask (Python)',
     'csharp': 'C#',
+    'java_log4j': 'Log4j (Java)',
+    'java_log4j2': 'Log4j 2.x (Java)',
+    'java_logback': 'Logback (Java)',
+    'java_logging': 'java.util.logging',
 }
 
 # Normalize counts to the 15 minute marker. This value MUST be less than 60. A
 # value of 0 would store counts for every minute, and is the lowest level of
 # accuracy provided.
 MINUTE_NORMALIZATION = 15
+
+# Prevent variables (e.g. context locals, http data, etc) from exceeding this
+# size in characters
+MAX_VARIABLE_SIZE = 512
+
+# Prevent varabiesl within extra context from exceeding this size in
+# characters
+MAX_EXTRA_VARIABLE_SIZE = 2048
+
+# For various attributes we dont limit the entire attribute on size, but the
+# individual item. In those cases we also want to limit the maximum number of
+# keys
+MAX_DICTIONARY_ITEMS = 50
+
+# Team slugs which may not be used. Generally these are top level URL patterns
+# which we don't want to worry about conflicts on.
+RESERVED_TEAM_SLUGS = (
+    'admin', 'manage', 'login', 'account', 'register', 'api',
+)
+
+LOG_LEVELS = {
+    logging.DEBUG: 'debug',
+    logging.INFO: 'info',
+    logging.WARNING: 'warning',
+    logging.ERROR: 'error',
+    logging.FATAL: 'fatal',
+}
+DEFAULT_LOG_LEVEL = 'error'
+DEFAULT_LOGGER_NAME = 'root'
+
+# Default alerting threshold values
+DEFAULT_ALERT_PROJECT_THRESHOLD = (500, 100)  # 500%, 100 events
+DEFAULT_ALERT_GROUP_THRESHOLD = (1000, 100)  # 1000%, 100 events
+
+# The maximum number of events which can be requested as JSON
+MAX_JSON_RESULTS = 1000
+
+# Default paginator value
+EVENTS_PER_PAGE = 15
+
+# Default sort option for the group stream
+DEFAULT_SORT_OPTION = 'date'
+
+# Default sort option for the search results
+SEARCH_DEFAULT_SORT_OPTION = 'date'
+
+# Setup languages for only available locales
+LANGUAGE_MAP = dict(settings.LANGUAGES)
+LANGUAGES = [(k, LANGUAGE_MAP[k]) for k in get_all_languages() if k in LANGUAGE_MAP]

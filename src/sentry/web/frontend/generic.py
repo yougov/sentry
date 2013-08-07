@@ -6,12 +6,9 @@ sentry.web.frontend.generic
 :license: BSD, see LICENSE for more details.
 """
 from django.http import HttpResponseRedirect
-from django.contrib.staticfiles import finders
 from django.core.urlresolvers import reverse
-from django.utils.datastructures import SortedDict
 from django.utils.translation import ugettext as _
 
-from sentry.constants import STATUS_VISIBLE
 from sentry.models import Team
 from sentry.permissions import can_create_teams
 from sentry.plugins import plugins
@@ -20,17 +17,9 @@ from sentry.web.decorators import login_required
 from sentry.web.helpers import render_to_response
 
 
-def find_static_files(ignore_patterns=()):
-    found_files = SortedDict()
-    for finder in finders.get_finders():
-        for path, storage in finder.list(ignore_patterns):
-            found_files[path] = storage.path(path)
-    return found_files
-
-
 @login_required
 def dashboard(request, template='dashboard.html'):
-    team_list = Team.objects.get_for_user(request.user)
+    team_list = Team.objects.get_for_user(request.user, with_projects=True)
     if not team_list:
         if can_create_teams(request.user):
             return HttpResponseRedirect(reverse('sentry-new-team'))
@@ -40,21 +29,8 @@ def dashboard(request, template='dashboard.html'):
             'message': _('You are not a member of any teams in Sentry and you do not have access to create a new team.'),
         }, request)
 
-    # This cookie gets automatically set by render_to_response
-    if len(team_list) == 1:
-        team = team_list.values()[0]
-        return HttpResponseRedirect(reverse('sentry', args=[team.slug]))
-
-    # these kinds of queries make people sad :(
-    results = []
-    for team in sorted(team_list.itervalues(), key=lambda x: x.name):
-        project_list = list(team.project_set.filter(
-            status=STATUS_VISIBLE,
-        ).order_by('name')[:20])
-        results.append((team, project_list))
-
     return render_to_response('sentry/select_team.html', {
-        'team_list': results,
+        'team_list': team_list.values(),
     }, request)
 
 
